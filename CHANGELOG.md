@@ -49,10 +49,7 @@
 
 按 magpie 社区收录要求（PR #805 审查意见）做出的重要变更：
 
-- **移除"每账号派生指纹"**（`machineMode: "account"`，`uuidv5(sha256(key))`）。
-  插件现在只发送**真实设备指纹**（SMBIOS UUID / `MachineGuid` / IOPlatformUUID /
-  `/etc/machine-id`），哈希方式与桌面端一致。同一设备上的多个账号共享该设备的一次
-  每日免费额度——这是 DeepAI 的设备配额设计，插件不做绕过。
+
 - **移除本机网关（DeepAICode2API）模式**：登录项与 `showGatewayLogin` / `gatewayUrl` /
   `gatewayKey` / `gatewayAdmin` 选项、池级额度（`/admin/api/accounts` 聚合）与池签到
   （`/admin/api/checkin`）全部删除；`src/gateway.mjs`、`scripts/mock-gateway.mjs` 移除。
@@ -64,7 +61,7 @@
 - 文档同步：README（中/英）、PROTOCOL.md 移除网关章节；测试 75 → 54（网关用例移除）。
 
 升级提示：0.1.x 的网关账号需要在 magpie 里重新以三路方式之一登录；已登录的直连账号
-不受影响（额度键从"派生指纹"变为"真实设备指纹"，单账号用户的每日额度行为不变）。
+
 
 ## 0.1.1 — 2026-11-06
 

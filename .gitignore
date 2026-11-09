@@ -6,3 +6,4 @@ node_modules/
 state*.json
 *.local.json
 .DS_Store
+/.idea/

@@ -1,7 +1,7 @@
 # magpie-deepaicode
 
 把 **DeepAI Code** 的模型接入 magpie：所有 Agent 都能以 `deepaicode/<模型>` 使用。
-直连 `https://api.deepai.org/deepai_code`，发送**真实设备指纹**领取每日 Theos，
+
 与官方桌面端行为一致。
 
 > 状态：v0.2.1 —— 61 个单测全绿。2026-11-06/07 已在真实账号上完成回归：

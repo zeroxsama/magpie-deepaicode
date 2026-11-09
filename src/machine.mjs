@@ -1,9 +1,5 @@
 // 机器指纹。
 //
-// 上游按 (X-DeepAI-Code-Machine, 账号) 每天发一次免费 Theos，指纹必须是
-// 真实设备标识（与桌面端行为一致）。插件不派生、不伪造指纹：
-// 同一台设备上的多个账号只有第一个能领到当日免费额度，这是上游的
-// 设备配额设计，插件不做任何绕过。
 //
 // 指纹 = sha256(小写原始 UUID)；原始值不上传。
 
@@ -97,7 +93,6 @@ export function detectDeviceRaw({
   return "";
 }
 
-/** 解析本次请求应使用的机器指纹：真实设备标识 → sha256。 */
 export function resolveMachineFingerprint() {
   return machineFingerprint(detectDeviceRaw());
 }
