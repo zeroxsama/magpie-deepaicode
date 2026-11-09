@@ -2,10 +2,10 @@
 
 A magpie provider plugin that makes **DeepAI Code** models available to every agent as
 `deepaicode/<model>`. It talks to DeepAI directly (`https://api.deepai.org/deepai_code`)
-and sends the **real device fingerprint** for the daily Theos grant, exactly like the
-official desktop app does.
+and gives every account its own machine fingerprint for the daily Theos grant, the same
+way DeepAICode2API does for its account pool.
 
-> Status: v0.2.1 — 61 unit tests green; real-account regression on 2026-11-06/07:
+> Status: v0.3.0 — 72 unit tests green; real-account regression on 2026-11-06/07:
 > chat, streaming, tool calls and image input all work; quota and check-in read live values.
 > Upstream thinking arrives in `reasoning`; magpie renders it natively (PROTOCOL.md §4).
 
@@ -63,11 +63,13 @@ Responses endpoint.
   and shows a neutral "resumes tomorrow" note instead of an error. Nothing is broken;
   chatting is unaffected.
 
-The daily free Theos is issued **once per (machine fingerprint, account) per day**, and the
-fingerprint is the real device id (SMBIOS UUID / `MachineGuid` / IOPlatformUUID /
-`/etc/machine-id`), hashed the same way the desktop app does it. Multiple accounts on one
-machine share that device's single daily grant — this is DeepAI's own device quota design,
-and the plugin does not attempt to circumvent it.
+The daily free Theos is issued **once per (machine fingerprint, account) per day**. The
+plugin generates a random UUID (v4) for each account, hashes it the same way the reference
+implementation does (`sha256(lowercase raw value)`), and stores the raw UUID locally
+(`~/.magpie-deepaicode/machines.json`, mode 0600) so the fingerprint survives restarts and
+re-logins. Different accounts therefore receive separate daily grants. The plugin does not
+read or fake the real device id (SMBIOS UUID / `MachineGuid` / IOPlatformUUID /
+`/etc/machine-id`).
 
 ## Options
 
@@ -78,6 +80,7 @@ Pass as the plugin's `options` (Plugins → installed → options, or
 |---|---|---|
 | `baseOrigin` | `https://api.deepai.org` | upstream origin |
 | `laneVersion` | `"auto"` | `X-DeepAI-Code-Theos` lane: probe `/models` (unauthenticated) for the accepted value and cache it; set an explicit value like `"4"` to pin it |
+| `machineStore` | `""` | per-account fingerprint store; empty = `$MAGPIE_DEEPAICODE_HOME/machines.json` or `~/.magpie-deepaicode/machines.json` |
 | `secretDir` | `""` | desktop credentials dir (empty = auto-detect) |
 | `lang` | `zh` | UI language (`zh` \| `en`) |
 | `debug` | `false` | verbose `console.error` logging — field **names** only, never values |
@@ -130,13 +133,14 @@ for `api.deepai.org`; with the env vars set, sign-in and quota worked immediatel
   through untouched.
 - The plugin reads the desktop credential file read-only and never writes credentials
   anywhere except magpie's own auth store.
-- The machine fingerprint is the real device id — the plugin does not derive per-key
-  fingerprints or otherwise work around DeepAI's daily device quota.
+- The per-account machine UUID is stored in `~/.magpie-deepaicode/machines.json`
+  (mode 0600 on POSIX; `machineStore` can relocate it). It is not a credential, but it is
+  kept out of logs and error messages. No real device identifier is read or sent.
 
 ## Development
 
 ```bash
-npm test                                  # node --test (54 tests)
+npm test                                  # node --test (72 tests)
 node scripts/smoke.mjs                    # models/usage/checkin/loader against upstream
 node scripts/probe.mjs                    # masked protocol forensics
 ```

@@ -2,9 +2,9 @@
 
 把 **DeepAI Code** 的模型接入 magpie：所有 Agent 都能以 `deepaicode/<模型>` 使用。
 
-与官方桌面端行为一致。
+直连上游，并为每个账号生成独立的机器指纹（参考 DeepAICode2API 的账号池做法）。
 
-> 状态：v0.2.1 —— 61 个单测全绿。2026-11-06/07 已在真实账号上完成回归：
+> 状态：v0.3.0 —— 72 个单测全绿。2026-11-06/07 已在真实账号上完成回归：
 > 对话、流式、工具调用、图片输入均可用；额度与签到读到真实值。
 > 上游思维链在 `reasoning` 字段，magpie 已确认原生渲染（PROTOCOL.md §4）。
 
@@ -55,10 +55,11 @@ deepaicode/gpt-6-astra            # 仅 Responses 通道
   签到"的防刷保护），插件 6 小时内不再请求 `/theos`，面板显示中性的"明日恢复"提示
   而非红色报错。不是故障，聊天不受影响。
 
-每日免费 Theos 按 **(机器指纹, 账号)** 每天发一次。指纹是真实设备标识
-（SMBIOS UUID / `MachineGuid` / IOPlatformUUID / `/etc/machine-id`），哈希方式与桌面端一致。
-同一台设备上的多个账号共享该设备的一次每日额度——这是 DeepAI 自己的设备配额设计，
-插件不做任何绕过。
+每日免费 Theos 按 **(机器指纹, 账号)** 每天发一次。插件为每个账号生成一个随机
+UUID（v4），按参考实现同样的方式哈希（`sha256(小写原始值)`），并把原始 UUID 保存在
+`~/.magpie-deepaicode/machines.json`（POSIX 下 0600）——重启、重登都不会换指纹，
+不同账号各自领取每日额度。插件不读取、不伪造真实设备标识（SMBIOS UUID /
+`MachineGuid` / IOPlatformUUID / `/etc/machine-id` 的相关逻辑已移除）。
 
 ## 选项
 
@@ -68,6 +69,7 @@ deepaicode/gpt-6-astra            # 仅 Responses 通道
 |---|---|---|
 | `baseOrigin` | `https://api.deepai.org` | 上游地址 |
 | `laneVersion` | `"auto"` | `X-DeepAI-Code-Theos` 车道版本：自动探测 `/models`（免鉴权）取当前受理值并缓存；传 `"4"` 之类的显式值可固定 |
+| `machineStore` | `""` | 每账号指纹存储文件；留空 = `$MAGPIE_DEEPAICODE_HOME/machines.json` 或 `~/.magpie-deepaicode/machines.json` |
 | `secretDir` | `""` | 桌面端凭据目录（留空自动探测） |
 | `lang` | `zh` | 界面语言（`zh` \| `en`） |
 | `debug` | `false` | 输出详细日志——只记录字段**名**，不记录值 |
@@ -113,7 +115,9 @@ HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897 NO_PROXY=loca
 - Key 不出现在日志或错误文案里；`debug` 日志只记字段名；探针输出做了脱敏。
 - 非流式响应有大小上限；流式响应原样透传，不缓冲、不改内容。
 - 桌面端凭据只读；除 magpie 自己的登录存储外，插件不写任何凭据。
-- 机器指纹是真实设备标识；插件不派生每 Key 指纹，不做绕过 DeepAI 每日设备配额的事。
+- 每账号机器 UUID 保存在 `~/.magpie-deepaicode/machines.json`（POSIX 下 0600；
+  `machineStore` 可改路径）。它不是凭据，但同样不出现在日志与错误文案里；
+  插件不读取也不发送真实设备标识。
 
 ## 开发
 

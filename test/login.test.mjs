@@ -5,8 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createMethods } from "../src/login.mjs";
+import { createLoader } from "../src/fetch.mjs";
+import { machineFingerprint } from "../src/machine.mjs";
 
 const KEY = "fake-deepai-key-0001";
+const KEY_B = "bbbbbbbb-2222-4333-8444-555555555555";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MACHINE_STORE = join(mkdtempSync(join(tmpdir(), "deepaicode-login-store-")), "machines.json");
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -36,18 +41,27 @@ test("桌面端登录：读文件 + /theos 验活", async () => {
   const old = process.env.T3CODE_HOME;
   process.env.T3CODE_HOME = base;
   try {
-    const fetchImpl = async (url) => {
-      if (url.endsWith("/theos")) return json({ enabled: true, balance: "200.00000", granted: "200.00000" });
+    let theosHeaders = null;
+    const fetchImpl = async (url, init) => {
+      if (url.endsWith("/theos")) {
+        theosHeaders = init.headers;
+        return json({ enabled: true, balance: "200.00000", granted: "200.00000" });
+      }
       throw new Error(`unexpected ${url}`);
     };
-    const methods = createMethods({ options: { lang: "zh", laneVersion: "4" }, deps: { fetchImpl } });
+    const methods = createMethods({ options: { lang: "zh", laneVersion: "4", machineStore: MACHINE_STORE }, deps: { fetchImpl } });
     const out = await methods[1].authorize({ dir: "", key: "", keyInputs: "" });
     assert.equal(out.type, "success");
     assert.equal(out.key, KEY);
     assert.equal(out.metadata.mode, "direct");
     assert.equal(out.metadata.source, "desktop");
     assert.equal(out.metadata.username, "ada");
-    assert.equal(out.metadata.machineId, undefined, "不应保存每账号派生的机器标识");
+    assert.match(out.metadata.machineId, UUID_V4, "登录时应为账号生成独立机器指纹");
+    assert.equal(
+      theosHeaders["X-DeepAI-Code-Machine"],
+      machineFingerprint(out.metadata.machineId),
+      "验活请求必须带该账号的指纹",
+    );
     assert.match(out.accountId, /^deepai:/);
   } finally {
     if (old === undefined) delete process.env.T3CODE_HOME;
@@ -71,7 +85,7 @@ test("粘贴登录：缺 Key 失败；有 Key 成功", async () => {
     if (url.endsWith("/theos")) return json({ enabled: true, balance: "200", granted: "200" });
     throw new Error(`unexpected ${url}`);
   };
-  const methods = createMethods({ options: { lang: "zh", laneVersion: "4" }, deps: { fetchImpl } });
+  const methods = createMethods({ options: { lang: "zh", laneVersion: "4", machineStore: MACHINE_STORE }, deps: { fetchImpl } });
 
   const missing = await methods[2].authorize({});
   assert.equal(missing.type, "failed");
@@ -81,6 +95,51 @@ test("粘贴登录：缺 Key 失败；有 Key 成功", async () => {
   assert.equal(ok.type, "success");
   assert.equal(ok.key, KEY);
   assert.equal(ok.metadata.username, "ada");
+  assert.match(ok.metadata.machineId, UUID_V4);
+});
+
+test("每号机器指纹：同 Key 重登复用，不同 Key 各自一份", async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/theos")) return json({ enabled: true, balance: "200", granted: "200" });
+    throw new Error(`unexpected ${url}`);
+  };
+  const options = { lang: "zh", laneVersion: "4", machineStore: MACHINE_STORE };
+  const first = await createMethods({ options, deps: { fetchImpl } })[2].authorize({ key: KEY, username: "ada" });
+  const again = await createMethods({ options, deps: { fetchImpl } })[2].authorize({ key: KEY, username: "ada" });
+  const other = await createMethods({ options, deps: { fetchImpl } })[2].authorize({ key: KEY_B, username: "bob" });
+
+  assert.equal(first.metadata.machineId, again.metadata.machineId, "同一账号重登必须复用同一指纹");
+  assert.notEqual(first.metadata.machineId, other.metadata.machineId, "不同账号必须不同指纹");
+  assert.notEqual(first.accountId, other.accountId);
+});
+
+test("登录 → loader：/theos 与推理请求使用同一账号指纹", async () => {
+  const options = { lang: "zh", laneVersion: "4", machineStore: MACHINE_STORE };
+  let theosFp = "";
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/theos")) {
+      theosFp = init.headers["X-DeepAI-Code-Machine"];
+      return json({ enabled: true, balance: "200", granted: "200" });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const out = await createMethods({ options, deps: { fetchImpl } })[2].authorize({ key: KEY, username: "ada" });
+  assert.equal(out.type, "success");
+  assert.equal(theosFp, machineFingerprint(out.metadata.machineId));
+
+  let chatFp = "";
+  const loader = createLoader(
+    { type: "api", key: out.key, accountId: out.accountId, metadata: out.metadata },
+    options,
+    {
+      fetchImpl: async (url, init) => {
+        chatFp = init.headers.get("x-deepai-code-machine");
+        return new Response("{}", { status: 200 });
+      },
+    },
+  );
+  await loader.fetch("https://api.deepai.org/deepai_code/chat/completions", { method: "POST", body: "{}" });
+  assert.equal(chatFp, theosFp, "验活与推理必须使用同一个指纹");
 });
 
 test("debug 日志只记字段名，绝不记录 Key 值", async () => {
@@ -93,7 +152,7 @@ test("debug 日志只记字段名，绝不记录 Key 值", async () => {
       throw new Error(`unexpected ${url}`);
     };
     const methods = createMethods({
-      options: { lang: "zh", debug: true, laneVersion: "4" },
+      options: { lang: "zh", debug: true, laneVersion: "4", machineStore: MACHINE_STORE },
       deps: { fetchImpl },
     });
     await methods[2].authorize({ key: KEY, username: "ada" });
@@ -114,7 +173,7 @@ test("浏览器登录：本地回调收到 code 后换 Key", async () => {
     }
     throw new Error(`unexpected ${url}`);
   };
-  const methods = createMethods({ options: { lang: "zh" }, deps: { fetchImpl } });
+  const methods = createMethods({ options: { lang: "zh", machineStore: MACHINE_STORE }, deps: { fetchImpl } });
   const method = methods[0];
 
   const authz = await method.authorize({}, {});
@@ -135,6 +194,7 @@ test("浏览器登录：本地回调收到 code 后换 Key", async () => {
   assert.equal(out.type, "success");
   assert.equal(out.key, KEY);
   assert.equal(out.metadata.source, "browser");
+  assert.match(out.metadata.machineId, UUID_V4);
 });
 
 test("浏览器登录：state 不匹配时拒绝回调，取消后返回 failed", async () => {

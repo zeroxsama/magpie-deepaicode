@@ -14,7 +14,8 @@ import { findDesktopCredentials } from "./credentials.mjs";
 import { getTheos, exchangeCode, normalizeAllowance, resolveLaneVersion } from "./direct.mjs";
 import { HttpError } from "./http.mjs";
 import { resolveLang, t } from "./i18n.mjs";
-import { resolveMachineFingerprint } from "./machine.mjs";
+import { machineFingerprint } from "./machine.mjs";
+import { ensureAccountMachineId } from "./machine-store.mjs";
 import { accountIdFor } from "./modes.mjs";
 import { trimSlash } from "./util.mjs";
 
@@ -38,10 +39,21 @@ function inputShape(inputs) {
   return names.length > 0 ? `fields present: ${names.join(", ")}` : "no input fields";
 }
 
+/**
+ * 登录阶段确定账号身份与机器指纹。
+ *
+ * 与参考项目 DeepAICode2API 一致：先为这个号生成（或复用）随机机器 UUID，
+ * 再用它的哈希去验活；登录成功后把原始 UUID 写进 auth.metadata.machineId。
+ */
+function loginMachine(options, key) {
+  const accountId = accountIdFor({ key });
+  const machineId = ensureAccountMachineId(accountId, { storePath: options.machineStore });
+  return { accountId, machineId, machineFp: machineFingerprint(machineId) };
+}
+
 /** 直连模式的验活：/theos。只有鉴权类错误才判登录失败，网络抖动放行。 */
-async function verifyDirectKey(origin, { key, fetchImpl, lang, laneVersion }) {
-  const machineFp = resolveMachineFingerprint();
-  const lane = await resolveLaneVersion(origin, { explicit: laneVersion, fetchImpl });
+async function verifyDirectKey(origin, { key, machineFp, fetchImpl, lang, laneVersion }) {
+  const lane = await resolveLaneVersion(origin, { explicit: laneVersion, fetchImpl, machineFp });
   try {
     const payload = await getTheos(origin, { key, machineFp, laneVersion: lane, fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS });
     return { ok: true, allowance: normalizeAllowance(payload) };
@@ -58,7 +70,7 @@ async function verifyDirectKey(origin, { key, fetchImpl, lang, laneVersion }) {
   }
 }
 
-function directSuccess({ cred, source, accountId }) {
+function directSuccess({ cred, source, accountId, machineId = "" }) {
   return {
     type: "success",
     key: cred.apiKey,
@@ -67,6 +79,7 @@ function directSuccess({ cred, source, accountId }) {
       mode: "direct",
       username: cred.username || "",
       source,
+      ...(machineId ? { machineId } : {}),
     },
   };
 }
@@ -109,8 +122,10 @@ function desktopMethod({ options, lang, fetchImpl }) {
         cred = found.cred;
       }
 
+      const machine = loginMachine(options, cred.apiKey);
       const verified = await verifyDirectKey(options.baseOrigin || DEFAULT_BASE_ORIGIN, {
         key: cred.apiKey,
+        machineFp: machine.machineFp,
         fetchImpl,
         lang,
         laneVersion: options.laneVersion,
@@ -120,7 +135,8 @@ function desktopMethod({ options, lang, fetchImpl }) {
       return directSuccess({
         cred,
         source: cred.path ? "desktop" : "manual",
-        accountId: accountIdFor({ key: cred.apiKey }),
+        accountId: machine.accountId,
+        machineId: machine.machineId,
       });
     },
   };
@@ -141,8 +157,10 @@ function pasteMethod({ options, lang, fetchImpl }) {
       const key = pickKey(inputs);
       if (!key) return { type: "failed", error: t(lang, "errKeyMissing") };
 
+      const machine = loginMachine(options, key);
       const verified = await verifyDirectKey(options.baseOrigin || DEFAULT_BASE_ORIGIN, {
         key,
+        machineFp: machine.machineFp,
         fetchImpl,
         lang,
         laneVersion: options.laneVersion,
@@ -152,7 +170,8 @@ function pasteMethod({ options, lang, fetchImpl }) {
       return directSuccess({
         cred: { apiKey: key, username: String(inputs.username ?? "").trim(), isPro: false },
         source: "manual",
-        accountId: accountIdFor({ key }),
+        accountId: machine.accountId,
+        machineId: machine.machineId,
       });
     },
   };
@@ -240,10 +259,12 @@ function browserMethod({ options, lang, fetchImpl }) {
   const finish = async (code) => {
     try {
       const cred = await exchangeCode(origin, code, { fetchImpl });
+      const machine = loginMachine(options, cred.apiKey);
       return directSuccess({
         cred,
         source: "browser",
-        accountId: accountIdFor({ key: cred.apiKey }),
+        accountId: machine.accountId,
+        machineId: machine.machineId,
       });
     } catch (err) {
       return { type: "failed", error: `换取 API Key 失败：${String(err?.message ?? err)}` };

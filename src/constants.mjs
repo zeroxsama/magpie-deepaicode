@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 
 export const PROVIDER = "deepaicode";
-export const VERSION = "0.2.3";
+export const VERSION = "0.3.0";
 
 /**
  * 插件自己的 UA，所有直连请求显式携带。
@@ -96,6 +96,8 @@ export const DEFAULT_OPTIONS = {
   baseOrigin: DEFAULT_BASE_ORIGIN,
   /** "auto"：按 LANE_PROBE_SEQUENCE 探测 /models（免鉴权）取当前受理值并进程内缓存；显式值原样生效 */
   laneVersion: "auto",
+  /** 每账号机器指纹存储文件；留空 = $MAGPIE_DEEPAICODE_HOME/machines.json 或 ~/.magpie-deepaicode/machines.json */
+  machineStore: "",
   /** 界面语言：zh | en */
   lang: "zh",
   /** 桌面端凭据目录（留空自动探测） */

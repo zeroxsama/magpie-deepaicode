@@ -62,6 +62,19 @@ test("resolveLaneVersion：auto 按序列探测并缓存（同 origin 只探一�
   assert.deepEqual(seen, ["4", "5"]);
 });
 
+test("resolveLaneVersion：machineFp 透传给 /models", async () => {
+  let captured = "";
+  const lane = await resolveLaneVersion("https://lane-fp.test", {
+    machineFp: "account-fp",
+    fetchImpl: async (url, init) => {
+      captured = init.headers["X-DeepAI-Code-Machine"];
+      return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    },
+  });
+  assert.equal(lane, "4");
+  assert.equal(captured, "account-fp");
+});
+
 test("resolveLaneVersion：探测网络错误时退回默认车道", async () => {
   const lane = await resolveLaneVersion("https://lane-error.test", {
     fetchImpl: async () => {

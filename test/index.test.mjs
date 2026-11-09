@@ -2,8 +2,13 @@
 // 这里把“入口能否被导入、钩子形状是否正确”纳入单测，避免相对路径这类低级故障。
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { DeepAICodePlugin, _internal, resolveOptions } from "../index.mjs";
+
+const MACHINE_STORE = join(mkdtempSync(join(tmpdir(), "deepaicode-index-store-")), "machines.json");
 
 test("入口可导入，且只导出插件函数 + _internal", () => {
   assert.equal(typeof DeepAICodePlugin, "function");
@@ -66,7 +71,7 @@ test("usage：成功结果进程内缓存，重复调用不打上游", async () 
     return new Response(JSON.stringify({ plan: "Free", credits_remaining: 0 }), { status: 200 });
   };
   try {
-    const hooks = await DeepAICodePlugin({ magpie: { options: { laneVersion: "4" } } }, {});
+    const hooks = await DeepAICodePlugin({ magpie: { options: { laneVersion: "4", machineStore: MACHINE_STORE } } }, {});
     const getAuth = async () => ({ type: "api", key: "k", accountId: "acc-ok", metadata: { mode: "direct" } });
     const a = await hooks.auth.usage(getAuth);
     const b = await hooks.auth.usage(getAuth);
@@ -89,7 +94,7 @@ test("usage：403 签到上限 → 中性展示 + 进程内长缓存，不再打
     );
   };
   try {
-    const hooks = await DeepAICodePlugin({ magpie: { options: { laneVersion: "4" } } }, {});
+    const hooks = await DeepAICodePlugin({ magpie: { options: { laneVersion: "4", machineStore: MACHINE_STORE } } }, {});
     const getAuth = async () => ({ type: "api", key: "k", accountId: "acc-locked", metadata: { mode: "direct" } });
     const a = await hooks.auth.usage(getAuth);
     const b = await hooks.auth.usage(getAuth);
@@ -118,5 +123,6 @@ test("resolveOptions：magpie options 与显式参数合并、类型收敛", () 
   const defaults = resolveOptions({}, {});
   assert.equal(defaults.baseOrigin, "https://api.deepai.org");
   assert.equal(defaults.laneVersion, "auto");
+  assert.equal(defaults.machineStore, "");
   assert.equal(defaults.debug, false);
 });

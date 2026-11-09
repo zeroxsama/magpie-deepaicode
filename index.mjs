@@ -25,7 +25,8 @@ import { ICON_DATA_URI } from "./src/icon.mjs";
 import { resolveLang, t } from "./src/i18n.mjs";
 import { findDesktopCredentials } from "./src/credentials.mjs";
 import { createMethods, startCallbackServer } from "./src/login.mjs";
-import { detectDeviceRaw, machineFingerprint, parseUuid, sha256Hex } from "./src/machine.mjs";
+import { derivedAccountUuid, machineFingerprint, newMachineUuid, parseUuid, sha256Hex } from "./src/machine.mjs";
+import { ensureAccountMachineId, machineStorePath, readAccountMachineIds, resetMachineStoreCache } from "./src/machine-store.mjs";
 import { accountIdFor, resolveAccountSettings } from "./src/modes.mjs";
 import { buildDirectCheckin, buildDirectUsage } from "./src/usage.mjs";
 import { describeError, formatNumber, isZeroCost, parseResetTime, toNumber, trimSlash } from "./src/util.mjs";
@@ -64,7 +65,7 @@ export const DeepAICodePlugin = async (input = {}, options = {}) => {
   /** 拉目录：上游 /deepai_code/models。 */
   async function loadCatalog(settings) {
     return catalogCache.get(settings.origin, async () => {
-      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl });
+      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl, machineFp: settings.machineFp });
       const payload = await getDirectModels(settings.origin, {
         machineFp: settings.machineFp,
         laneVersion: lane,
@@ -109,7 +110,7 @@ export const DeepAICodePlugin = async (input = {}, options = {}) => {
     if (cached && Date.now() - cached.at < cached.ttl) return cached.value;
 
     try {
-      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl });
+      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl, machineFp: settings.machineFp });
       const [allowancePayload, summary] = await Promise.all([
         getDirectTheos(settings.origin, {
           key: settings.key,
@@ -160,7 +161,7 @@ export const DeepAICodePlugin = async (input = {}, options = {}) => {
     }
 
     try {
-      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl });
+      const lane = await resolveLaneVersion(settings.origin, { explicit: settings.laneVersion, fetchImpl, machineFp: settings.machineFp });
       const payload = await getDirectTheos(settings.origin, {
         key: settings.key,
         machineFp: settings.machineFp,
@@ -232,10 +233,15 @@ export const _internal = {
   createMethods,
   findDesktopCredentials,
   startCallbackServer,
-  detectDeviceRaw,
+  derivedAccountUuid,
   machineFingerprint,
+  newMachineUuid,
   parseUuid,
   sha256Hex,
+  ensureAccountMachineId,
+  machineStorePath,
+  readAccountMachineIds,
+  resetMachineStoreCache,
   describeError,
   formatNumber,
   isZeroCost,

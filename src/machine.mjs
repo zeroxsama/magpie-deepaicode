@@ -1,13 +1,18 @@
 // 机器指纹。
 //
-//
 // 指纹 = sha256(小写原始 UUID)；原始值不上传。
+//
+// 只保留参考项目 DeepAICode2API 的账号池做法：
+//   - 每个账号一个随机 UUID v4（NewMachineUUID），按账号落盘保存
+//     （见 machine-store.mjs）；
+//   - 请求头 X-DeepAI-Code-Machine = sha256(小写原始 UUID)。
+//
+// 不读取、不伪造真实设备标识（SMBIOS UUID / MachineGuid / IOPlatformUUID /
+// machine-id 等逻辑已移除）。
 
-import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 
-/** 固件占位 UUID：不能作为稳定标识。 */
+/** 历史遗留的占位 UUID：不能作为账号指纹。 */
 const PLACEHOLDER_UUIDS = new Set([
   "00000000-0000-0000-0000-000000000000",
   "ffffffff-ffff-ffff-ffff-ffffffffffff",
@@ -35,64 +40,37 @@ export function parseUuid(text) {
   return PLACEHOLDER_UUIDS.has(v) ? "" : v;
 }
 
-function run(cmd, args, timeout = 12_000) {
-  try {
-    return execFileSync(cmd, args, { encoding: "utf8", timeout, windowsHide: true });
-  } catch {
-    return "";
-  }
+/** 把 16 字节格式化为 8-4-4-4-12。 */
+export function formatUuid(bytes) {
+  const hex = Buffer.from(bytes).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-function readText(path) {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
+/**
+ * 生成一个新的随机 UUID（v4）。
+ *
+ * 参考实现 DeepAICode2API 的同名函数：每个账号分配一个独立机器指纹，
+ * 上游才会按 (机器指纹, 账号) 分别发放每日免费额度。
+ */
+export function newMachineUuid() {
+  const b = randomBytes(16);
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant RFC 4122
+  return formatUuid(b);
 }
 
-/** 探测真实设备标识（原始 UUID / machine-id 文本）。失败返回空串。 */
-export function detectDeviceRaw({
-  platform = process.platform,
-  run: runImpl = run,
-  read: readImpl = readText,
-  env = process.env,
-} = {}) {
-  const override = String(env?.DEEPAI_MACHINE_ID ?? "").trim();
-  if (override) return override;
-
-  if (platform === "win32") {
-    const fromWmi = parseUuid(
-      runImpl("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
-      ]),
-    );
-    if (fromWmi) return fromWmi;
-    const reg = runImpl("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"]);
-    const m = String(reg).match(/MachineGuid\s+REG_SZ\s+(\S+)/);
-    return m ? m[1].toLowerCase() : "";
-  }
-
-  if (platform === "darwin") {
-    const out = runImpl("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
-    const m = String(out).match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
-    return m ? parseUuid(m[1]) : "";
-  }
-
-  // linux / 其他 unix
-  for (const path of ["/sys/class/dmi/id/product_uuid", "/etc/machine-id", "/var/lib/dbus/machine-id"]) {
-    const raw = String(readImpl(path) ?? "").trim();
-    if (!raw) continue;
-    const uuid = parseUuid(raw);
-    if (uuid) return uuid;
-    return raw.toLowerCase();
-  }
-  return "";
-}
-
-export function resolveMachineFingerprint() {
-  return machineFingerprint(detectDeviceRaw());
+/**
+ * 由账号 id 稳定派生一个 UUID 形态的机器标识。
+ *
+ * 只在落盘失败（只读文件系统 / 无 home 权限）时兜底：
+ * 同一账号永远得到同一个值，不会每次重启都换指纹。
+ */
+export function derivedAccountUuid(accountId) {
+  const digest = createHash("sha256")
+    .update(`magpie-deepaicode:machine:${String(accountId ?? "")}`, "utf8")
+    .digest();
+  const b = Buffer.from(digest.subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  return formatUuid(b);
 }

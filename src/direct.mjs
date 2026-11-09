@@ -21,7 +21,7 @@ import {
   LANE_PROBE_SEQUENCE,
   USER_AGENT,
 } from "./constants.mjs";
-import { resolveMachineFingerprint } from "./machine.mjs";
+import { machineFingerprint, newMachineUuid } from "./machine.mjs";
 import { parseResetTime, trimSlash } from "./util.mjs";
 
 export function directOrigin(origin) {
@@ -52,25 +52,29 @@ export function directHeaders({ key = "", machineFp = "", laneVersion = DEFAULT_
  * 显式值原样返回、不探测；auto 按 LANE_PROBE_SEQUENCE 依次试，取第一个 200 的值，
  * 每个 origin 进程内只探测一次（缓存 Promise）。探测失败（网络抖动等）退回默认车道，
  * 让真正的业务请求再去暴露问题。
+ *
+ * machineFp 可选：调用方有账号指纹时传进来，/models 与业务请求保持一致；
+ * 不传时用进程内随机指纹（单测 / 独立调用），不读取真实设备标识。
  */
 const laneCache = new Map();
+const PROBE_MACHINE_FP = machineFingerprint(newMachineUuid());
 
-export function resolveLaneVersion(origin, { explicit, fetchImpl } = {}) {
+export function resolveLaneVersion(origin, { explicit, fetchImpl, machineFp = "" } = {}) {
   const value = String(explicit ?? "auto").trim();
   if (value && value.toLowerCase() !== "auto") return Promise.resolve(value);
 
   const key = directOrigin(origin);
   if (!laneCache.has(key)) {
-    laneCache.set(key, probeLane(key, fetchImpl));
+    laneCache.set(key, probeLane(key, fetchImpl, machineFp));
   }
   return laneCache.get(key);
 }
 
-async function probeLane(origin, fetchImpl) {
-  const machineFp = resolveMachineFingerprint();
+async function probeLane(origin, fetchImpl, machineFp = "") {
+  const fp = String(machineFp ?? "").trim() || PROBE_MACHINE_FP;
   for (const lane of LANE_PROBE_SEQUENCE) {
     try {
-      await getDirectModels(origin, { machineFp, laneVersion: lane, fetchImpl });
+      await getDirectModels(origin, { machineFp: fp, laneVersion: lane, fetchImpl });
       return lane;
     } catch (err) {
       if (err instanceof HttpError && err.status === 426) continue;

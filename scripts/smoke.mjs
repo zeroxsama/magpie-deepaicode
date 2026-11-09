@@ -6,6 +6,7 @@
 
 import { findDesktopCredentials } from "../src/credentials.mjs";
 import { DeepAICodePlugin, resolveOptions } from "../index.mjs";
+import { accountIdFor } from "../src/modes.mjs";
 
 const argv = process.argv.slice(2);
 function arg(name, fallback) {
@@ -28,7 +29,7 @@ const options = resolveOptions({}, { debug: false });
 const auth = {
   type: "api",
   key,
-  accountId: "deepai:smoke",
+  accountId: accountIdFor({ key }),
   metadata: { mode: "direct" },
 };
 

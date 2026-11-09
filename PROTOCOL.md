@@ -3,12 +3,17 @@
 本文件记录插件实现所依赖的**上游契约**，以及每条结论的证据等级。
 它替代"每次改动都去翻反编译源码"：实现有疑问时先看这里。
 
-- 快照日期：**2026-11-06**（模型目录 2026-11-08 更新）；**2026-11-08**：适配上游车道协议变更（lane 4 / UA / Instance / 请求体校验，见 §1.2/§1.3）
+- 快照日期：**2026-11-06**（模型目录 2026-11-08 更新）；**2026-11-08**：适配上游车道协议变更（lane 4 / UA / Instance / 请求体校验，见 §1.2/§1.3）；**2026-11-09**：改为每账号机器指纹并移除真实设备探测（见 §1.2）
 - 参考实现：[DeepAICode2API](https://github.com/2951461586/DeepAICode2API)（MIT）——上游协议的逆向结论最初来自它的 `internal/deepai/*`、`docs/recon.md`
 - 插件规范：[magpie 插件开发指南](https://usemagpie.ai/docs/zh/plugins)
 
-> **0.2.0 变更**：移除本机网关（DeepAICode2API）模式与"每账号派生指纹"
-> （`machineMode: "account"`）。前者服务于账号池，后者会绕过上游的每日设备配额；
+> **0.3.0 变更**：改为每账号机器指纹，并移除真实设备指纹逻辑。做法与参考实现的
+> `NewMachineUUID()` 一致：每个号一个随机 UUID v4，落盘保存，请求时发它的 sha256。
+> 每个账号因此各自领取每日免费额度；不再提供 device 模式。
+
+> **0.2.0 变更（历史）**：移除本机网关（DeepAICode2API）模式与"每账号派生指纹"
+> （`machineMode: "account"`）。0.3.0 按账号池用法恢复了后者，并彻底移除了
+> 真实设备指纹与 device 模式。
 
 > 文中原"网关"相关事实保留为历史记录（标注 0.1.x）。
 
@@ -55,11 +60,17 @@
 补一条最简 `system` / `instructions`，不改已有内容。经桌面端本地中继回放验证与 UA
 过滤相互独立（[#3](https://github.com/aqiu817/magpie-deepaicode/pull/3) 的证据）。
 
-**机器指纹的策略（0.2.0）**：指纹取真实设备标识——Windows 为
-SMBIOS `Win32_ComputerSystemProduct.UUID`（回落 `MachineGuid`）、macOS 为
-`IOPlatformUUID`、Linux 为 `product_uuid` / `/etc/machine-id`；哈希方式与桌面端一致
-（sha256(小写去空白原始值)），原始值不上传。插件**不做**每 Key 派生、不伪造指纹：
-同一设备上的多个账号共享该设备的一次每日额度，这是上游的设备配额设计。
+**机器指纹的策略（0.3.0）**：只使用参考项目 DeepAICode2API 的账号池逻辑——每个账号
+一个随机 UUID v4（`NewMachineUUID()`），首次使用时生成并写入
+`~/.magpie-deepaicode/machines.json`（`machineStore` 可改路径），登录时同时写进
+`auth.metadata.machineId`。请求头发 `sha256(小写原始值)`，原始值不上传。同一账号重登、
+重启都复用同一个 UUID；不同账号互不相同，因此各自领取每日额度（上游的分配键是
+`(X-DeepAI-Code-Machine, 账号)`）。落盘失败时退回 `derivedAccountUuid(accountId)`
+（按账号稳定派生，重启不变）。
+
+插件**不读取真实设备标识**：SMBIOS UUID / `MachineGuid` / IOPlatformUUID /
+`/etc/machine-id` 探测、`DEEPAI_MACHINE_ID` 覆盖与 device 模式均已移除。哈希方式与
+参考实现一致（sha256(小写去空白原始值)）。
 
 ### 1.3 错误语义
 

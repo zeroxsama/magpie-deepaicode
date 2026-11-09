@@ -1,19 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { VERSION } from "../src/constants.mjs";
 import { createLoader, guardResponse, normalizeIncomingUrl, shapeRequestBody } from "../src/fetch.mjs";
+import { machineFingerprint } from "../src/machine.mjs";
 import { resolveAccountSettings } from "../src/modes.mjs";
 
 const CHAT = "/chat/completions";
 const FAKE_KEY = "fake-deepai-key-0001";
+const OTHER_KEY = "bbbbbbbb-2222-4333-8444-555555555555";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MACHINE_STORE = join(mkdtempSync(join(tmpdir(), "deepaicode-fetch-store-")), "machines.json");
 
 function directAuth(options = {}) {
   return { type: "api", key: FAKE_KEY, metadata: { mode: "direct", ...options } };
 }
 
-// 测试里显式给 lane，避免触发 auto 探测
-const LANE_OPTS = { laneVersion: "4" };
+// 测试里显式给 lane，避免触发 auto 探测；机器指纹写到临时文件，不碰真实 home
+const LANE_OPTS = { laneVersion: "4", machineStore: MACHINE_STORE };
 
 test("normalizeIncomingUrl：直连模式归一到 /deepai_code/{chat,responses}", () => {
   const settings = resolveAccountSettings(directAuth(), { baseOrigin: "https://api.deepai.org", ...LANE_OPTS });
@@ -42,6 +49,22 @@ test("createLoader：直连头含 UA / Api-Key / 车道 / 实例 id / 机器指�
   assert.match(direct.headers["X-DeepAI-Code-Instance"], /^[0-9a-f]{32}$/);
   assert.ok(direct.headers["X-DeepAI-Code-Machine"]);
   assert.equal(direct.headers.Authorization, undefined);
+});
+
+test("createLoader：每个账号独立机器指纹，同账号稳定", () => {
+  const a1 = resolveAccountSettings(directAuth(), LANE_OPTS);
+  const a2 = resolveAccountSettings(directAuth(), LANE_OPTS);
+  const b = resolveAccountSettings({ ...directAuth(), key: OTHER_KEY }, LANE_OPTS);
+
+  assert.match(a1.machineId, UUID_V4);
+  assert.equal(a1.machineFp, a2.machineFp, "同一账号必须稳定");
+  assert.notEqual(a1.machineFp, b.machineFp, "不同账号必须不同");
+  assert.equal(a1.machineFp, machineFingerprint(a1.machineId));
+
+  const loaderA = createLoader(directAuth(), LANE_OPTS);
+  const loaderB = createLoader({ ...directAuth(), key: OTHER_KEY }, LANE_OPTS);
+  assert.equal(loaderA.headers["X-DeepAI-Code-Machine"], a1.machineFp);
+  assert.equal(loaderB.headers["X-DeepAI-Code-Machine"], b.machineFp);
 });
 
 test("loader.fetch：直连注入 Api-Key / 车道 / 机器指纹", async () => {

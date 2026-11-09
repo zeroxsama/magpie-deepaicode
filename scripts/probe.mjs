@@ -1,12 +1,14 @@
 // 协议取证脚本：不经 magpie，直接验证上游 api.deepai.org 的契约。
 //
-//   node scripts/probe.mjs [--key …] [--secret-dir …] [--base https://api.deepai.org]
+//   node scripts/probe.mjs [--key …] [--secret-dir …] [--base https://api.deepai.org] [--machine-store PATH]
 //
 // 输出每一步的“阶段 / 状态 / 原话 / 耗时”，全程脱敏（Key 只留前 6 后 4）。
 
 import { findDesktopCredentials } from "../src/credentials.mjs";
 import { getDirectModels, getTheos, getUsageSummary, normalizeAllowance } from "../src/direct.mjs";
-import { resolveMachineFingerprint } from "../src/machine.mjs";
+import { machineFingerprint } from "../src/machine.mjs";
+import { ensureAccountMachineId } from "../src/machine-store.mjs";
+import { accountIdFor } from "../src/modes.mjs";
 import { trimSlash } from "../src/util.mjs";
 
 function parseArgs(argv) {
@@ -78,8 +80,12 @@ async function runDirect(args) {
   }
   step("credentials", { source, key: maskKey(key), username: username || "(empty)" });
 
-  const machineFp = resolveMachineFingerprint();
-  step("machine", { fingerprint: maskFp(machineFp), source: "device" });
+  const machineFp = machineFingerprint(
+    ensureAccountMachineId(accountIdFor({ key }), {
+      storePath: String(args["machine-store"] ?? "").trim(),
+    }),
+  );
+  step("machine", { fingerprint: maskFp(machineFp), source: "account" });
 
   let code = 0;
   await timed("models", async () => {

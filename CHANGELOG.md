@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 — 2026-11-09
+
+每账号独立机器指纹（参考 [DeepAICode2API](https://github.com/2951461586/DeepAICode2API)
+的账号池做法），并移除真实设备指纹逻辑：
+
+- **每个账号一个随机 UUID v4**（等同参考实现的 `NewMachineUUID()`）：登录 / 首次请求时
+  生成，请求头 `X-DeepAI-Code-Machine` 发它的 sha256；不同账号指纹互不相同，各自领取
+  每日免费 Theos。
+- **持久化**：原始 UUID 写入 `~/.magpie-deepaicode/machines.json`（POSIX 0600，
+  可用 `machineStore` 改路径），同时写进 `auth.metadata.machineId`；同一账号重启、
+  重登都复用同一个值，不会重新"抽奖"。
+- **存量账号自动补齐**：没有 `machineId` 的旧账号在首次请求时生成并落盘（只补空值，
+  不覆盖已有值），等同参考实现的 `assign_machine`。升级后每个存量号会换一次指纹；
+  若当天碰到上游"签到重启次数超限"403，插件按既有逻辑锁定 6 小时，次日自动恢复。
+- **移除真实设备指纹**：删除 SMBIOS UUID / `MachineGuid` / IOPlatformUUID /
+  `/etc/machine-id` 探测、`DEEPAI_MACHINE_ID` 覆盖与 `machineMode` 选项；
+  现在不存在 device 模式，所有账号一律使用独立 UUID。
+- **落盘失败兜底**：只读文件系统 / 无 home 权限时退回按账号稳定派生（重启不变）。
+- 登录验活（`/theos`）与后续推理 / 额度 / 签到使用同一个账号指纹。
+- 测试 63 → 72（UUID v4、落盘复用、账号互异、metadata 优先、只读兜底）。
+
 ## 0.2.3 — 2026-11-08
 
 - 额度查询缓存时长上调：成功与错误均 **10 分钟**（0.2.2 为 60s/5min——magpie 面板
